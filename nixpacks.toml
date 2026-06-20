@@ -1,0 +1,5 @@
+[phases.setup]
+nixPkgs = ["python311", "libreoffice", "fontconfig"]
+
+[start]
+cmd = "python bot.py"

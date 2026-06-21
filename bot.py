@@ -20,6 +20,10 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
 from pdf2docx import Converter
+from PIL import Image
+import pillow_heif
+
+pillow_heif.register_heif_opener()
 
 # ---------------------------------------------------------------------------
 # Sozlamalar
@@ -128,7 +132,30 @@ def word_to_pdf(docx_path: str, output_dir: str) -> str:
     return str(Path(output_dir) / f"{base}.pdf")
 
 
+# --- YANGI QO'SHILADIGAN QISM BOSHLANISHI ---
+
+def convert_image_to_jpg(input_path: str, output_path: str) -> None:
+    """Har qanday rasm formatini (HEIC, PNG, WEBP) JPG ga o'tkazadi."""
+    img = Image.open(input_path)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(output_path, "JPEG", quality=90)
+
+
+def voice_to_mp3(input_path: str, output_path: str) -> None:
+    """Telegram voice (.ogg) faylni .mp3 ga o'tkazadi (ffmpeg orqali)."""
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", input_path, output_path],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+# --- YANGI QO'SHILADIGAN QISM TUGASHI ---
+
+
 def main_menu_keyboard() -> InlineKeyboardMarkup:
+    ...
     buttons = [
         [InlineKeyboardButton("📷 Rasm(lar) → PDF", callback_data="mode_images")],
         [InlineKeyboardButton("📝 Matn → PDF", callback_data="mode_text")],
@@ -299,9 +326,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "📄 PDF → Word rejimi tanlandi.\n\n"
             "Endi .pdf faylni yuboring."
         ),
-        "mode_word2pdf": (
+       "mode_word2pdf": (
             "📃 Word → PDF rejimi tanlandi.\n\n"
             "Endi .docx faylni yuboring."
+        ),
+        "mode_imgconvert": (
+            "🖼 Rasm formatini o'zgartirish rejimi tanlandi.\n\n"
+            "Endi rasmni Document (fayl) sifatida yuboring — HEIC, PNG, WEBP "
+            "formatlari JPG ga o'tkaziladi."
+        ),
+        "mode_voice2mp3": (
+            "🎵 Ovozli xabar → MP3 rejimi tanlandi.\n\n"
+            "Endi ovozli xabar (voice message) yuboring."
         ),
     }
 
@@ -340,36 +376,52 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    ...
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+        context.user_data["mode"] = None
+
+
+# --- YANGI FUNKSIYA ---
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await is_subscribed(update.effective_user.id, context):
         await send_subscription_required(update, context)
         return
 
     mode = context.user_data.get("mode")
-    if mode != "mode_text":
+    if mode != "mode_voice2mp3":
         await update.message.reply_text(
-            "Avval menyudan kerakli rejimni tanlang. /start"
+            "Avval menyudan '🎵 Ovozli xabar → MP3' ni tanlang. /start"
         )
         return
 
-    text = update.message.text
     user_id = update.effective_user.id
-    output_path = str(TMP_DIR / f"{user_id}_text.pdf")
+    voice = update.message.voice
+    input_path = str(TMP_DIR / f"{user_id}_voice_input.ogg")
+    output_path = str(TMP_DIR / f"{user_id}_voice_output.mp3")
+
+    file = await voice.get_file()
+    await file.download_to_drive(input_path)
+
+    await update.message.reply_text("Konvertatsiya qilinmoqda, kuting... ⏳")
 
     try:
-        text_to_pdf(text, output_path)
+        voice_to_mp3(input_path, output_path)
         with open(output_path, "rb") as f:
-            await update.message.reply_document(
-                document=f,
-                filename="matn.pdf",
-                caption="Mana PDF faylingiz ✅",
-                reply_markup=result_keyboard("mode_text"),
+            await update.message.reply_audio(
+                audio=f,
+                filename="natija.mp3",
+                caption="Mana MP3 fayl ✅",
+                reply_markup=result_keyboard("mode_voice2mp3"),
             )
     except Exception as e:
-        logger.exception("Matn->PDF xatosi")
+        logger.exception("Voice->MP3 xatosi")
         await update.message.reply_text(f"Xatolik yuz berdi: {e}")
     finally:
+        Path(input_path).unlink(missing_ok=True)
         Path(output_path).unlink(missing_ok=True)
         context.user_data["mode"] = None
+# --- YANGI FUNKSIYA TUGASHI ---
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -411,7 +463,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             Path(output_path).unlink(missing_ok=True)
             context.user_data["mode"] = None
 
-    elif mode == "mode_word2pdf":
+  elif mode == "mode_word2pdf":
         if not doc.file_name.lower().endswith((".docx", ".doc")):
             await update.message.reply_text("Iltimos, .docx fayl yuboring.")
             return
@@ -442,6 +494,32 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 pass
             context.user_data["mode"] = None
 
+    elif mode == "mode_imgconvert":
+        input_path = str(TMP_DIR / f"{user_id}_img_input")
+        output_path = str(TMP_DIR / f"{user_id}_img_output.jpg")
+
+        file = await doc.get_file()
+        await file.download_to_drive(input_path)
+
+        await update.message.reply_text("Konvertatsiya qilinmoqda, kuting... ⏳")
+
+        try:
+            convert_image_to_jpg(input_path, output_path)
+            with open(output_path, "rb") as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename="natija.jpg",
+                    caption="Mana JPG fayl ✅",
+                    reply_markup=result_keyboard("mode_imgconvert"),
+                )
+        except Exception as e:
+            logger.exception("Rasm konvertatsiya xatosi")
+            await update.message.reply_text(f"Xatolik yuz berdi: {e}")
+        finally:
+            Path(input_path).unlink(missing_ok=True)
+            Path(output_path).unlink(missing_ok=True)
+            context.user_data["mode"] = None
+
     else:
         await update.message.reply_text(
             "Avval menyudan kerakli rejimni tanlang. /start"
@@ -465,9 +543,10 @@ def main() -> None:
     app.add_handler(CommandHandler("done", done_images))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
+    
     logger.info("Bot ishga tushdi...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

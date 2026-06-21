@@ -134,6 +134,8 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📝 Matn → PDF", callback_data="mode_text")],
         [InlineKeyboardButton("📄 PDF → Word", callback_data="mode_pdf2word")],
         [InlineKeyboardButton("📃 Word → PDF", callback_data="mode_word2pdf")],
+        [InlineKeyboardButton("🖼 Rasm formatini o'zgartirish", callback_data="mode_imgconvert")],
+        [InlineKeyboardButton("🎵 Ovozli xabar → MP3", callback_data="mode_voice2mp3")],
     ]
     return InlineKeyboardMarkup(buttons)
 

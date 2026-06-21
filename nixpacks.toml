@@ -3,3 +3,5 @@ nixPkgs = ["python311", "libreoffice", "fontconfig"]
 
 [start]
 cmd = "python bot.py"
+[phases.setup]
+nixPkgs = ["...", "ffmpeg"]

@@ -5,6 +5,9 @@ import tempfile
 import subprocess
 from pathlib import Path
 
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -36,6 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Majburiy a'zolik talab qilinadigan kanal va guruh username'lari (@ bilan)
 REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "@mychannel")
@@ -50,6 +54,73 @@ user_images: dict[int, list[str]] = {}
 
 TMP_DIR = Path(tempfile.gettempdir()) / "pdfbot_files"
 TMP_DIR.mkdir(exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Baza bilan ishlash
+# ---------------------------------------------------------------------------
+
+def get_connection():
+    return psycopg2.connect(DATABASE_URL)
+
+
+def init_db() -> None:
+    """Bot ishga tushganda jadval yo'q bo'lsa yaratadi."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            username TEXT,
+            joined_at TIMESTAMP DEFAULT NOW(),
+            files_converted INT DEFAULT 0
+        )
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def register_user(user_id: int, username: str | None) -> None:
+    """Foydalanuvchini bazaga qo'shadi (agar mavjud bo'lmasa)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO users (user_id, username)
+        VALUES (%s, %s)
+        ON CONFLICT (user_id) DO NOTHING
+        """,
+        (user_id, username),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def increment_conversion_count(user_id: int) -> None:
+    """Foydalanuvchining konvertatsiya sonini birga oshiradi."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET files_converted = files_converted + 1 WHERE user_id = %s",
+        (user_id,),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_total_users() -> int:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM users")
+    count = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +305,8 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    register_user(update.effective_user.id, update.effective_user.username)
+
     if not await is_subscribed(update.effective_user.id, context):
         await send_subscription_required(update, context)
         return
@@ -282,6 +355,15 @@ async def done_images(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         Path(output_path).unlink(missing_ok=True)
         user_images.pop(user_id, None)
         context.user_data["mode"] = None
+        # --- YANGI QO'SHILADIGAN QISM ---
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    total = get_total_users()
+    await update.message.reply_text(f"Jami foydalanuvchilar: {total}")
+# --- YANGI QO'SHILADIGAN QISM TUGASHI ---
 
 
 # ---------------------------------------------------------------------------
@@ -536,11 +618,19 @@ def main() -> None:
             "BOT_TOKEN environment variable topilmadi. Uni Railway sozlamalarida qo'shing."
         )
 
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL environment variable topilmadi. Railway'da PostgreSQL qo'shilganmi?"
+        )
+
+    init_db()
+
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("done", done_images))
+    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))

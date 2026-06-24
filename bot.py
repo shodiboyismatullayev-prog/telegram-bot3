@@ -418,7 +418,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ),
     }
 
-    await query.edit_message_text(messages.get(mode, "Noma'lum tanlov."))
+   text = messages.get(mode, "Noma'lum tanlov.")
+   try:
+       await query.edit_message_text(text)
+   except Exception:
+       await query.message.reply_text(text)
 
 
 # ---------------------------------------------------------------------------

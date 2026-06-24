@@ -458,10 +458,36 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await is_subscribed(update.effective_user.id, context):
+        await send_subscription_required(update, context)
+        return
+
+    mode = context.user_data.get("mode")
+    if mode != "mode_text":
+        await update.message.reply_text(
+            "Avval menyudan kerakli rejimni tanlang. /start"
+        )
+        return
+
+    text = update.message.text
+    user_id = update.effective_user.id
+    output_path = str(TMP_DIR / f"{user_id}_text.pdf")
+
+    try:
+        text_to_pdf(text, output_path)
+        with open(output_path, "rb") as f:
+            await update.message.reply_document(
+                document=f,
+                filename="matn.pdf",
+                caption="Mana PDF faylingiz ✅",
+                reply_markup=result_keyboard("mode_text"),
+            )
+    except Exception as e:
+        logger.exception("Matn->PDF xatosi")
+        await update.message.reply_text(f"Xatolik yuz berdi: {e}")
     finally:
         Path(output_path).unlink(missing_ok=True)
         context.user_data["mode"] = None
-
 
 # --- YANGI FUNKSIYA ---
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

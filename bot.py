@@ -458,7 +458,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    ...
     finally:
         Path(output_path).unlink(missing_ok=True)
         context.user_data["mode"] = None
